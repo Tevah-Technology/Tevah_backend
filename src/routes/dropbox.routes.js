@@ -5,76 +5,59 @@ const {
   listFolder,
 } = require('../services/dropbox.service');
 
-const env =
-  require('../config/env');
+const router = express.Router();
 
-const router =
-  express.Router();
+// ============================================================
+// GET DROPBOX ACCOUNT
+// ============================================================
 
-/**
- * GET /api/dropbox/account
- */
-router.get(
-  '/account',
-  async (req, res) => {
-    try {
-      const account =
-        await getAccountInfo();
+router.get('/account', async (req, res) => {
+  try {
+    const account = await getAccountInfo();
 
-      res.json({
-        success: true,
-        data: account,
-      });
-    } catch (error) {
-      console.error(
-        'Dropbox account error:',
-        error,
-      );
+    res.json({
+      success: true,
+      data: account,
+    });
+  } catch (error) {
+    console.error('Dropbox account error:', error);
 
-      res.status(500).json({
-        success: false,
-        message:
-          'Failed to connect to Dropbox',
-        error: error.message,
-      });
-    }
-  },
-);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to connect to Dropbox',
+      error: error.message,
+    });
+  }
+});
 
-/**
- * GET /api/dropbox/files
- */
-router.get(
-  '/files',
-  async (req, res) => {
-    try {
-      const path =
-        req.query.path ||
-        env.dropbox.portfolioPath;
+// ============================================================
+// GET DROPBOX FILES
+// ============================================================
 
-      const files =
-        await listFolder(path);
+router.get('/files', async (req, res) => {
+  try {
+    const path =
+      req.query.path ||
+      process.env.DROPBOX_PORTFOLIO_PATH ||
+      '/THEVA_PORTFOLIO';
 
-      res.json({
-        success: true,
-        path,
-        count: files.length,
-        data: files,
-      });
-    } catch (error) {
-      console.error(
-        'Dropbox files error:',
-        error,
-      );
+    const files = await listFolder(path);
 
-      res.status(500).json({
-        success: false,
-        message:
-          'Failed to list Dropbox files',
-        error: error.message,
-      });
-    }
-  },
-);
+    res.json({
+      success: true,
+      path,
+      count: files.length,
+      data: files,
+    });
+  } catch (error) {
+    console.error('Dropbox files error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to list Dropbox files',
+      error: error.message,
+    });
+  }
+});
 
 module.exports = router;

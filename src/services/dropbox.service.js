@@ -1,40 +1,41 @@
 const { Dropbox } = require('dropbox');
 
-const env = require('../config/env');
+require('dotenv').config();
 
 let dropboxClient = null;
 
-/**
- * Create Dropbox client.
- *
- * The refresh token allows the backend to obtain
- * fresh short-lived access tokens automatically.
- */
+// ============================================================
+// DROPBOX CLIENT
+// ============================================================
+
 function getDropboxClient() {
   if (!dropboxClient) {
-    if (
-      !env.dropbox.appKey ||
-      !env.dropbox.appSecret ||
-      !env.dropbox.refreshToken
-    ) {
+    const appKey = process.env.DROPBOX_APP_KEY;
+    const appSecret = process.env.DROPBOX_APP_SECRET;
+    const refreshToken = process.env.DROPBOX_REFRESH_TOKEN;
+
+    if (!appKey || !appSecret || !refreshToken) {
       throw new Error(
-        'Dropbox environment variables are missing.',
+        'Dropbox environment variables are missing. ' +
+          'Check DROPBOX_APP_KEY, DROPBOX_APP_SECRET and ' +
+          'DROPBOX_REFRESH_TOKEN in .env',
       );
     }
 
     dropboxClient = new Dropbox({
-      clientId: env.dropbox.appKey,
-      clientSecret: env.dropbox.appSecret,
-      refreshToken: env.dropbox.refreshToken,
+      clientId: appKey,
+      clientSecret: appSecret,
+      refreshToken: refreshToken,
     });
   }
 
   return dropboxClient;
 }
 
-/**
- * List a Dropbox folder.
- */
+// ============================================================
+// LIST FOLDER
+// ============================================================
+
 async function listFolder(path) {
   const dbx = getDropboxClient();
 
@@ -59,9 +60,10 @@ async function listFolder(path) {
   return entries;
 }
 
-/**
- * List all files recursively.
- */
+// ============================================================
+// LIST FOLDER RECURSIVELY
+// ============================================================
+
 async function listFolderRecursive(path) {
   const dbx = getDropboxClient();
 
@@ -86,9 +88,10 @@ async function listFolderRecursive(path) {
   return entries;
 }
 
-/**
- * Get existing shared links for a Dropbox file.
- */
+// ============================================================
+// GET SHARED LINKS
+// ============================================================
+
 async function getSharedLinks(path) {
   const dbx = getDropboxClient();
 
@@ -111,23 +114,28 @@ async function getSharedLinks(path) {
   }
 }
 
-/**
- * Create a public shared link.
- *
- * We first check whether a link already exists.
- */
+// ============================================================
+// CREATE / GET SHARED LINK
+// ============================================================
+
 async function getOrCreateSharedLink(path) {
   const dbx = getDropboxClient();
 
-  // Check existing links
-  const existing =
-    await getSharedLinks(path);
+  // ----------------------------------------------------------
+  // CHECK EXISTING LINK
+  // ----------------------------------------------------------
+
+  const existing = await getSharedLinks(path);
 
   if (existing.length > 0) {
     return convertDropboxLink(
       existing[0].url,
     );
   }
+
+  // ----------------------------------------------------------
+  // CREATE NEW LINK
+  // ----------------------------------------------------------
 
   try {
     const result =
@@ -149,10 +157,10 @@ async function getOrCreateSharedLink(path) {
   }
 }
 
-/**
- * Convert Dropbox preview link to a direct
- * browser-friendly link.
- */
+// ============================================================
+// CONVERT DROPBOX LINK
+// ============================================================
+
 function convertDropboxLink(url) {
   if (!url) {
     return null;
@@ -167,15 +175,12 @@ function convertDropboxLink(url) {
     .replace('&dl=0', '');
 }
 
-/**
- * Determine file type.
- */
+// ============================================================
+// FILE TYPE
+// ============================================================
+
 function getFileType(name) {
-  const extension =
-    name
-      .split('.')
-      .pop()
-      ?.toLowerCase() || '';
+  const extension = getExtension(name);
 
   const images = [
     'jpg',
@@ -184,6 +189,7 @@ function getFileType(name) {
     'webp',
     'gif',
     'avif',
+    'svg',
   ];
 
   const videos = [
@@ -191,6 +197,8 @@ function getFileType(name) {
     'webm',
     'mov',
     'm4v',
+    'avi',
+    'mkv',
   ];
 
   if (images.includes(extension)) {
@@ -204,110 +212,365 @@ function getFileType(name) {
   return 'file';
 }
 
-/**
- * Get file extension.
- */
+// ============================================================
+// FILE EXTENSION
+// ============================================================
+
 function getExtension(name) {
-  return (
-    name
-      .split('.')
-      .pop()
-      ?.toLowerCase() || ''
-  );
+  if (!name) {
+    return '';
+  }
+
+  const parts = name.split('.');
+
+  if (parts.length < 2) {
+    return '';
+  }
+
+  return parts
+    .pop()
+    .toLowerCase();
 }
 
-/**
- * Build portfolio projects from Dropbox.
- *
- * Expected Dropbox structure:
- *
- * /THEVA_PORTFOLIO
- *
- *   /WEBSITE
- *      /Project One
- *          thumbnail.jpg
- *          project.mp4
- *
- *   /APP
- *      /Project Two
- *          thumbnail.jpg
- *          project.mp4
- *
- *   /LOGO
- *      /Project Three
- *          thumbnail.png
- *
- *   /VIDEO
- *      /Project Four
- *          thumbnail.jpg
- *          project.mp4
- *
- *   /GRAPHIC_DESIGNS
- *      /Project Five
- *          thumbnail.jpg
- */
+// ============================================================
+// CATEGORY NORMALIZATION
+// ============================================================
+
+function normalizeCategory(category) {
+  const value =
+    category
+      .trim()
+      .toUpperCase();
+
+  switch (value) {
+    case 'APP':
+    case 'APPS':
+    case 'APPLICATION':
+    case 'APPLICATIONS':
+      return 'APP';
+
+    case 'WEBSITE':
+    case 'WEBSITES':
+    case 'WEB':
+      return 'WEBSITE';
+
+    case 'LOGO':
+    case 'LOGOS':
+    case 'BRANDING':
+      return 'LOGO';
+
+    case 'VIDEO':
+    case 'VIDEOS':
+      return 'VIDEO';
+
+    case 'GRAPHIC':
+    case 'GRAPHICS':
+    case 'GRAPHIC DESIGN':
+    case 'GRAPHIC DESIGNS':
+    case 'GRAPHIC_DESIGNS':
+      return 'GRAPHIC DESIGNS';
+
+    default:
+      return value;
+  }
+}
+
+// ============================================================
+// BUILD PROJECT FROM FILES
+// ============================================================
+
+async function buildProjectFromFiles({
+  projectName,
+  category,
+  projectPath,
+  files,
+}) {
+  let thumbnail = null;
+  let videoUrl = null;
+
+  const otherFiles = [];
+
+  for (const file of files) {
+    if (file['.tag'] !== 'file') {
+      continue;
+    }
+
+    const extension =
+      getExtension(file.name);
+
+    const fileType =
+      getFileType(file.name);
+
+    const url =
+      await getOrCreateSharedLink(
+        file.path_lower,
+      );
+
+    if (!url) {
+      continue;
+    }
+
+    // --------------------------------------------------------
+    // THUMBNAIL
+    // --------------------------------------------------------
+
+    const isThumbnailName =
+      file.name
+        .toLowerCase()
+        .startsWith('thumbnail');
+
+    if (
+      !thumbnail &&
+      fileType === 'image'
+    ) {
+      thumbnail = url;
+
+      // If explicitly named thumbnail,
+      // definitely use it as thumbnail.
+      if (isThumbnailName) {
+        continue;
+      }
+
+      continue;
+    }
+
+    // --------------------------------------------------------
+    // VIDEO
+    // --------------------------------------------------------
+
+    if (
+      !videoUrl &&
+      fileType === 'video'
+    ) {
+      videoUrl = url;
+      continue;
+    }
+
+    // --------------------------------------------------------
+    // OTHER FILE
+    // --------------------------------------------------------
+
+    otherFiles.push({
+      name: file.name,
+      url,
+      type: fileType,
+      extension,
+    });
+  }
+
+  return {
+    id:
+      projectPath ||
+      `${category}-${projectName}`,
+
+    title: projectName,
+
+    category,
+
+    thumbnail,
+
+    videoUrl,
+
+    files: otherFiles,
+
+    path: projectPath,
+
+    isFeatured: false,
+  };
+}
+
+// ============================================================
+// GET PROJECT FROM PROJECT FOLDER
+// ============================================================
+
+async function getProjectFromFolder(
+  projectFolder,
+  category,
+) {
+  const projectFiles =
+    await listFolder(
+      projectFolder.path_lower,
+    );
+
+  return buildProjectFromFiles({
+    projectName:
+      projectFolder.name,
+
+    category,
+
+    projectPath:
+      projectFolder.path_display,
+
+    files: projectFiles,
+  });
+}
+
+// ============================================================
+// GET PORTFOLIO
+// ============================================================
+
 async function getPortfolio() {
   const root =
-    env.dropbox.portfolioPath;
+    process.env.DROPBOX_PORTFOLIO_PATH ||
+    '/THEVA_PORTFOLIO';
+
+  console.log('');
+  console.log(
+    '==============================================',
+  );
+  console.log(
+    'DROPBOX PORTFOLIO',
+  );
+  console.log(
+    '==============================================',
+  );
+  console.log(
+    'Root:',
+    root,
+  );
+
+  // ----------------------------------------------------------
+  // GET CATEGORY FOLDERS
+  // ----------------------------------------------------------
 
   const categories =
     await listFolder(root);
 
-  const folders =
+  console.log(
+    'Root entries:',
+    categories.length,
+  );
+
+  const categoryFolders =
     categories.filter(
       (entry) =>
         entry['.tag'] === 'folder',
     );
 
+  console.log(
+    'Category folders:',
+    categoryFolders.map(
+      (folder) => folder.name,
+    ),
+  );
+
   const projects = [];
 
-  for (const categoryFolder of folders) {
-    const category =
-      categoryFolder.name
-        .toUpperCase();
+  // ==========================================================
+  // LOOP CATEGORIES
+  // ==========================================================
 
-    const projectFolders =
+  for (
+    const categoryFolder
+    of categoryFolders
+  ) {
+    const category =
+      normalizeCategory(
+        categoryFolder.name,
+      );
+
+    console.log('');
+    console.log(
+      '----------------------------------------------',
+    );
+
+    console.log(
+      'Category:',
+      categoryFolder.name,
+      '=>',
+      category,
+    );
+
+    console.log(
+      'Path:',
+      categoryFolder.path_display,
+    );
+
+    // --------------------------------------------------------
+    // GET CATEGORY CONTENT
+    // --------------------------------------------------------
+
+    const categoryEntries =
       await listFolder(
         categoryFolder.path_lower,
       );
 
-    for (
-      const projectFolder
-      of projectFolders
-    ) {
-      if (
-        projectFolder['.tag'] !==
-        'folder'
+    console.log(
+      'Entries:',
+      categoryEntries.length,
+    );
+
+    // ========================================================
+    // PROJECT FOLDER STRUCTURE
+    // ========================================================
+
+    const projectFolders =
+      categoryEntries.filter(
+        (entry) =>
+          entry['.tag'] === 'folder',
+      );
+
+    // ========================================================
+    // DIRECT FILE STRUCTURE
+    // ========================================================
+
+    const directFiles =
+      categoryEntries.filter(
+        (entry) =>
+          entry['.tag'] === 'file',
+      );
+
+    // --------------------------------------------------------
+    // STRUCTURE A
+    // PROJECTS ARE FOLDERS
+    // --------------------------------------------------------
+
+    if (projectFolders.length > 0) {
+      console.log(
+        'Project folders:',
+        projectFolders.map(
+          (folder) =>
+            folder.name,
+        ),
+      );
+
+      for (
+        const projectFolder
+        of projectFolders
       ) {
-        continue;
-      }
+        const project =
+          await getProjectFromFolder(
+            projectFolder,
+            category,
+          );
 
-      const projectFiles =
-        await listFolder(
-          projectFolder.path_lower,
+        projects.push(project);
+
+        console.log(
+          'Added project:',
+          project.title,
         );
+      }
+    }
 
-      let thumbnail = null;
-      let videoUrl = null;
+    // --------------------------------------------------------
+    // STRUCTURE B
+    // FILES ARE DIRECTLY INSIDE CATEGORY
+    // --------------------------------------------------------
 
-      const otherFiles = [];
+    if (directFiles.length > 0) {
+      console.log(
+        'Direct files:',
+        directFiles.map(
+          (file) =>
+            file.name,
+        ),
+      );
 
       for (
         const file
-        of projectFiles
+        of directFiles
       ) {
-        if (
-          file['.tag'] !==
-          'file'
-        ) {
-          continue;
-        }
-
-        const extension =
-          getExtension(
-            file.name,
-          );
-
         const fileType =
           getFileType(
             file.name,
@@ -322,60 +585,189 @@ async function getPortfolio() {
           continue;
         }
 
-        // Thumbnail
+        const extension =
+          getExtension(
+            file.name,
+          );
+
+        // ------------------------------------------------------
+        // IMAGE
+        // ------------------------------------------------------
+
         if (
-          !thumbnail &&
           fileType === 'image'
         ) {
-          thumbnail = url;
+          projects.push({
+            id:
+              file.id,
+
+            title:
+              file.name
+                .replace(
+                  /\.[^/.]+$/,
+                  '',
+                ),
+
+            category,
+
+            thumbnail:
+              url,
+
+            videoUrl:
+              null,
+
+            files: [
+              {
+                name:
+                  file.name,
+
+                url,
+
+                type:
+                  fileType,
+
+                extension,
+              },
+            ],
+
+            path:
+              file.path_display,
+
+            isFeatured:
+              false,
+          });
+
           continue;
         }
 
-        // Video
+        // ------------------------------------------------------
+        // VIDEO
+        // ------------------------------------------------------
+
         if (
-          !videoUrl &&
           fileType === 'video'
         ) {
-          videoUrl = url;
+          projects.push({
+            id:
+              file.id,
+
+            title:
+              file.name
+                .replace(
+                  /\.[^/.]+$/,
+                  '',
+                ),
+
+            category,
+
+            thumbnail:
+              null,
+
+            videoUrl:
+              url,
+
+            files: [
+              {
+                name:
+                  file.name,
+
+                url,
+
+                type:
+                  fileType,
+
+                extension,
+              },
+            ],
+
+            path:
+              file.path_display,
+
+            isFeatured:
+              false,
+          });
+
           continue;
         }
 
-        otherFiles.push({
-          name: file.name,
-          url,
-          type: fileType,
-          extension,
+        // ------------------------------------------------------
+        // OTHER FILE
+        // ------------------------------------------------------
+
+        projects.push({
+          id:
+            file.id,
+
+          title:
+            file.name
+              .replace(
+                /\.[^/.]+$/,
+                '',
+              ),
+
+          category,
+
+          thumbnail:
+            null,
+
+          videoUrl:
+            null,
+
+          files: [
+            {
+              name:
+                file.name,
+
+              url,
+
+              type:
+                fileType,
+
+              extension,
+            },
+          ],
+
+          path:
+            file.path_display,
+
+          isFeatured:
+            false,
         });
       }
-
-      projects.push({
-        id: projectFolder.id,
-
-        title:
-          projectFolder.name,
-
-        category,
-
-        thumbnail,
-
-        videoUrl,
-
-        files: otherFiles,
-
-        path:
-          projectFolder.path_display,
-
-        isFeatured: false,
-      });
     }
   }
+
+  console.log('');
+  console.log(
+    '==============================================',
+  );
+  console.log(
+    'TOTAL PORTFOLIO PROJECTS:',
+    projects.length,
+  );
+  console.log(
+    '==============================================',
+  );
+
+  // ----------------------------------------------------------
+  // PRINT PROJECTS
+  // ----------------------------------------------------------
+
+  projects.forEach(
+    (project, index) => {
+      console.log(
+        `${index + 1}. ${project.title} | ${project.category}`,
+      );
+    },
+  );
 
   return projects;
 }
 
-/**
- * Get Dropbox account information.
- */
+// ============================================================
+// ACCOUNT INFO
+// ============================================================
+
 async function getAccountInfo() {
   const dbx =
     getDropboxClient();
@@ -385,6 +777,10 @@ async function getAccountInfo() {
 
   return result.result;
 }
+
+// ============================================================
+// EXPORTS
+// ============================================================
 
 module.exports = {
   getDropboxClient,
